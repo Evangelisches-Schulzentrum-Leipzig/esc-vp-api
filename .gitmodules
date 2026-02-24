@@ -1,0 +1,3 @@
+[submodule "esc-vp-wireshark"]
+	path = esc-vp-wireshark
+	url = https://github.com/Evangelisches-Schulzentrum-Leipzig/esc-vp-wireshark/
