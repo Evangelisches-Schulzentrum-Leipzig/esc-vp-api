@@ -135,6 +135,11 @@ const server = Net.createServer((socket) => {
     console.log('Client connected.');
     console.log(`Client address: ${socket.remoteAddress}:${socket.remotePort}`);
 
+    // Register error handler first to prevent unhandled 'error' events
+    socket.on('error', (err) => {
+        console.error(`Socket error from ${socket.remoteAddress}:${socket.remotePort}: ${err.message}`);
+    });
+
     socket.on('data', (chunk) => {
         console.log(`Data received from client (hex): ${chunk.toString('hex')}`);
         console.log(`Data received from client (ascii): ${chunk.toString('ascii')}`);
@@ -218,6 +223,10 @@ const server = Net.createServer((socket) => {
 });
 server.on('error', (err) => {
     console.error(`Server error: ${err}`);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error(`Uncaught exception: ${err.message}`);
 });
 
 server.listen(port, host, () => {
