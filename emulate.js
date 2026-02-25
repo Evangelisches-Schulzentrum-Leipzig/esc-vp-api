@@ -5,10 +5,29 @@
 const Net = require('net');
 const dgram = require('dgram');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+// Load .env file without external packages
+const envPath = path.resolve(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, 'utf-8')
+        .split('\n')
+        .filter(line => line.trim() && !line.startsWith('#'))
+        .forEach(line => {
+            const idx = line.indexOf('=');
+            if (idx !== -1) {
+                const key = line.slice(0, idx).trim();
+                const value = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
+                if (!process.env[key]) process.env[key] = value;
+            }
+        });
+}
 
 const port = 3629;
 const host = '0.0.0.0';
 const password = 'admin';
+const fakeSalt = Buffer.from(process.env.FAKE_SALT || '00000000000000000000000000000000', 'hex');
 const projectorName = 'EPSON Projector';
 
 // ==================== UDP HELLO Server (Session-less Mode) ====================
@@ -338,7 +357,7 @@ function handleConnectRequest(socket, headerCount, headers) {
         }
     } else if (challengeHeader) {
         // Client is requesting MD5 challenge — send empty salt (emulation mode)
-        const salt = Buffer.alloc(16, 1); // Empty salt for emulation
+        const salt = fakeSalt; // Empty salt for emulation
         console.log(`[TCP] CONNECT: MD5 challenge requested, sending salt: ${salt.toString('hex')}`);
 
         // Build Unauthorized response with salt in a password header
@@ -354,6 +373,7 @@ function handleConnectRequest(socket, headerCount, headers) {
         console.log(`[TCP] CONNECT: MD5 hash received: ${receivedHash.toString('hex')}`);
         if (saltEchoHeader) {
             console.log(`[TCP] CONNECT: salt echo received: ${saltEchoHeader.info.toString('hex')}`);
+            console.log(`[TCP] CONNECT: full hash header: ${receivedHash.toString('hex')}${saltEchoHeader.info.toString('hex')}`);
         }
         // TODO: validate hash = MD5(salt + password) when implementing real auth
         console.log('[TCP] CONNECT: accepting hash (emulation mode). ESC/VP21 session started.');
