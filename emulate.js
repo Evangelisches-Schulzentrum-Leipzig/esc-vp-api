@@ -130,108 +130,220 @@ function buildResponse(type, status, headers) {
 }
 
 // ==================== TCP Server (Session Mode) ====================
+// Per spec: TCP allows only type 2 (PASSWORD) and type 3 (CONNECT).
+// After error responses and PASSWORD responses, the TCP connection is cut.
+// After successful CONNECT, the connection stays open for ESC/VP21 commands.
 
 const server = Net.createServer((socket) => {
-    console.log('Client connected.');
-    console.log(`Client address: ${socket.remoteAddress}:${socket.remotePort}`);
+    console.log(`[TCP] Client connected: ${socket.remoteAddress}:${socket.remotePort}`);
 
     // Register error handler first to prevent unhandled 'error' events
     socket.on('error', (err) => {
-        console.error(`Socket error from ${socket.remoteAddress}:${socket.remotePort}: ${err.message}`);
+        console.error(`[TCP] Socket error from ${socket.remoteAddress}:${socket.remotePort}: ${err.message}`);
     });
 
     socket.on('data', (chunk) => {
-        console.log(`Data received from client (hex): ${chunk.toString('hex')}`);
-        console.log(`Data received from client (ascii): ${chunk.toString('ascii')}`);
+        console.log(`[TCP] Data received (hex): ${chunk.toString('hex')}`);
+        console.log(`[TCP] Data received (ascii): ${chunk.toString('ascii')}`);
 
-        // Parse ESC/VP.net request
-        if (chunk.length >= 16 && chunk.toString('ascii', 0, 10) === 'ESC/VP.net') {
-            const protocolVersion = chunk.readUInt8(10);
-            const messageType = chunk.readUInt8(11);
-            const headerNumber = chunk.readUInt8(15);
-            console.log(`Protocol version: 0x${protocolVersion.toString(16)}`);
-            console.log(`Message type: 0x${messageType.toString(16)}`);
-            console.log(`Header number: ${headerNumber}`);
-            
-            if (messageType === 0x03 && headerNumber >= 1) { // CONNECTION message with at least 1 header
-                const headerIdentifier = chunk.readUInt8(16);
-                const headerAttributes = chunk.readUInt8(17);
-                console.log(`Header identifier: 0x${headerIdentifier.toString(16)}`);
-                console.log(`Header attributes: 0x${headerAttributes.toString(16)}`);
+        // --- Common validation (spec §6.1) ---
 
-                if (headerIdentifier === 0x01 && (headerAttributes & 0x03) === 0x03) { // Password header with MD5 hash request
-                    // Generate random salt
-                    // const salt = crypto.randomBytes(16);
+        // Minimum packet size
+        if (chunk.length < 16) {
+            console.log('[TCP] Packet too short, ignoring.');
+            return;
+        }
 
-                    // Generate salt with only zeros
-                    const salt = Buffer.alloc(16, 0);
+        // Protocol identifier
+        if (chunk.toString('ascii', 0, 10) !== 'ESC/VP.net') {
+            console.log('[TCP] Invalid protocol identifier, sending Bad Request and disconnecting.');
+            socket.end(buildResponse(0x00, 0x40, []));
+            return;
+        }
 
-                    console.log(`Generated salt for client: ${salt.toString('hex')}`);
-                    
-                    // Send response with salt
-                    const responseBuffer = Buffer.alloc(34);
-                    responseBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
-                    responseBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
-                    responseBuffer.writeUInt8(0x03, 11); // Message type (0x03 = CONNECTION)
-                    responseBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
-                    responseBuffer.writeUInt8(0x41, 14); // Status (0x41 = Unauthorized - Password Required)
-                    responseBuffer.writeUInt8(0x01, 15); // Header number (1 additional header)
-                    responseBuffer.writeUInt8(0x01, 16); // Header identifier (0x01 = Password)
-                    responseBuffer.writeUInt8(0x06, 17); // Header attributes (0x06 = Unknown)
-                    salt.copy(responseBuffer, 18); // Response data (salt) -> 16 bytes
-                    console.log(`Sending response to client (hex): ${responseBuffer.toString('hex')}`);
-                    socket.write(responseBuffer);
-                } else if (headerIdentifier === 0x01 && (headerAttributes & 0x04) === 0x04) { // Password header with MD5 hash
-                    const receivedHash = chunk.slice(18, 34);
-                    console.log(`Received MD5 hash from client: ${receivedHash.toString('hex')}`);
-                    
-                    // Validate hash
-                    // const expectedHash = crypto.createHash('md5').update(salt + password).digest();
-                    if (true) { // For testing, accept any hash
-                        console.log('Client authenticated successfully.');
-                        // Send success response
-                        const successBuffer = Buffer.alloc(34);
-                        successBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
-                        successBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
-                        successBuffer.writeUInt8(0x03, 11); // Message type (0x03 = CONNECTION)
-                        successBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
-                        successBuffer.writeUInt8(0x20, 14); // Status (0x20 = OK)
-                        successBuffer.writeUInt8(0x00, 15); // Header number (no additional headers)
-                        console.log(`Sending authentication success response to client (hex): ${successBuffer.toString('hex')}`);
-                        socket.write(successBuffer);
-                    } else {
-                        console.log('Client authentication failed. Wrong password.');
-                        // Send failure response
-                        const failureBuffer = Buffer.alloc(34);
-                        failureBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
-                        failureBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
-                        failureBuffer.writeUInt8(0x03, 11); // Message type (0x03 = CONNECTION)
-                        failureBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
-                        failureBuffer.writeUInt8(0x43, 14); // Status (0x43 = Forbidden - Wrong Password)
-                        failureBuffer.writeUInt8(0x00, 15); // Header number (no additional headers)
-                        console.log(`Sending authentication failure response to client (hex): ${failureBuffer.toString('hex')}`);
-                        socket.write(failureBuffer);
-                    }
-                }
-            } else if ((messageType === 0x03 || messageType === 0x02) && headerNumber === 0) { // CONNECTION or PASSWORD message with no headers
-                console.log('Received CONNECTION message with no headers. Sending Password Required response.');
-                const responseBuffer = Buffer.alloc(34);
-                responseBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
-                responseBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
-                responseBuffer.writeUInt8(messageType, 11); // Message type (0x03 = CONNECTION)
-                responseBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
-                responseBuffer.writeUInt8(0x41, 14); // Status (0x41 = Unauthorized - Password Required)
-                responseBuffer.writeUInt8(0x00, 15); // Header number
-                console.log(`Sending Password Required response to client (hex): ${responseBuffer.toString('hex')}`);
-                socket.write(responseBuffer);
-            }
+        const protocolVersion = chunk.readUInt8(10);
+        const messageType = chunk.readUInt8(11);
+        const reserved = chunk.readUInt16BE(12);
+        const statusByte = chunk.readUInt8(14);
+        const headerCount = chunk.readUInt8(15);
+
+        console.log(`[TCP] Version: 0x${protocolVersion.toString(16)}, Type: ${messageType}, Status: 0x${statusByte.toString(16)}, Headers: ${headerCount}`);
+
+        // Version must be 0x10 (spec §6.1)
+        if (protocolVersion !== 0x10) {
+            console.log('[TCP] Unsupported version, sending Version Not Supported and disconnecting.');
+            socket.end(buildResponse(messageType, 0x55, []));
+            return;
+        }
+
+        // Reserved must be 0, status must be 0x00 for requests (spec §6.1)
+        if (reserved !== 0 || statusByte !== 0x00) {
+            console.log('[TCP] Invalid reserved/status, sending Bad Request and disconnecting.');
+            socket.end(buildResponse(messageType, 0x40, []));
+            return;
+        }
+
+        // Type must be 0..3 (spec §6.1)
+        if (messageType < 0 || messageType > 3) {
+            console.log('[TCP] Type out of range, sending Bad Request and disconnecting.');
+            socket.end(buildResponse(messageType, 0x40, []));
+            return;
+        }
+
+        // TCP only allows type 2 (PASSWORD) and type 3 (CONNECT) (spec §6.3)
+        if (messageType !== 0x02 && messageType !== 0x03) {
+            console.log(`[TCP] Type ${messageType} not allowed in session mode, sending Request Not Allowed and disconnecting.`);
+            socket.end(buildResponse(messageType, 0x45, []));
+            return;
+        }
+
+        // --- Parse headers ---
+        const headers = [];
+        for (let i = 0; i < headerCount; i++) {
+            const offset = 16 + i * 18;
+            if (offset + 18 > chunk.length) break;
+            headers.push({
+                id: chunk.readUInt8(offset),
+                attr: chunk.readUInt8(offset + 1),
+                info: chunk.slice(offset + 2, offset + 18)
+            });
+        }
+
+        // --- PASSWORD request (type 2) (spec §5.1) ---
+        if (messageType === 0x02) {
+            handlePasswordRequest(socket, headerCount, headers);
+            return;
+        }
+
+        // --- CONNECT request (type 3) (spec §5.2) ---
+        if (messageType === 0x03) {
+            handleConnectRequest(socket, headerCount, headers);
+            return;
         }
     });
 
     socket.on('close', () => {
-        console.log('Client disconnected.');
+        console.log(`[TCP] Client disconnected: ${socket.remoteAddress}:${socket.remotePort}`);
     });
 });
+
+// --- PASSWORD handler (spec §5.1) ---
+// After response, TCP connection is always cut.
+function handlePasswordRequest(socket, headerCount, headers) {
+    // Validate: only Password (id 1) and New-Password (id 2) headers allowed (spec §6.5)
+    for (const h of headers) {
+        if (h.id !== 0x01 && h.id !== 0x02) {
+            console.log(`[TCP] PASSWORD request has invalid header id ${h.id}, sending Bad Request.`);
+            socket.end(buildResponse(0x02, 0x40, []));
+            return;
+        }
+    }
+
+    if (headerCount === 0) {
+        // PASSWORD check: is a password set? (spec §5.1.1)
+        if (password) {
+            console.log('[TCP] PASSWORD check: password is set, sending Unauthorized.');
+            socket.end(buildResponse(0x02, 0x41, []));
+        } else {
+            console.log('[TCP] PASSWORD check: no password set, sending OK.');
+            socket.end(buildResponse(0x02, 0x20, []));
+        }
+        return;
+    }
+
+    // PASSWORD confirm: check the provided password (spec §5.1.2)
+    const pwHeader = headers.find(h => h.id === 0x01);
+    if (!pwHeader) {
+        console.log('[TCP] PASSWORD confirm: no password header, sending Bad Request.');
+        socket.end(buildResponse(0x02, 0x40, []));
+        return;
+    }
+
+    if (pwHeader.attr === 0x01) {
+        // Plain text password
+        const receivedPw = pwHeader.info.toString('ascii').replace(/\0/g, '');
+        console.log(`[TCP] PASSWORD confirm (plain): received="${receivedPw}"`);
+        if (!password || receivedPw === password) {
+            console.log('[TCP] PASSWORD confirm: OK.');
+            socket.end(buildResponse(0x02, 0x20, []));
+        } else {
+            console.log('[TCP] PASSWORD confirm: wrong password, sending Forbidden.');
+            socket.end(buildResponse(0x02, 0x43, []));
+        }
+    } else if (pwHeader.attr === 0x04) {
+        // MD5 hash — accept all for now (emulation mode)
+        // TODO: validate hash against salt + password when implementing real auth
+        console.log(`[TCP] PASSWORD confirm (MD5): accepting hash (emulation mode).`);
+        socket.end(buildResponse(0x02, 0x20, []));
+    } else {
+        console.log(`[TCP] PASSWORD confirm: unknown attr 0x${pwHeader.attr.toString(16)}, sending Bad Request.`);
+        socket.end(buildResponse(0x02, 0x40, []));
+    }
+}
+
+// --- CONNECT handler (spec §5.2) ---
+// After error, TCP connection is cut.
+// After success, TCP stays open for ESC/VP21 bidirectional session.
+function handleConnectRequest(socket, headerCount, headers) {
+    if (headerCount === 0) {
+        // CONNECT without password (spec §5.2.1)
+        if (password) {
+            // Password is set but not provided (spec §6.4 CONNECT errors)
+            console.log('[TCP] CONNECT without password but password is required, sending Unauthorized and disconnecting.');
+            socket.end(buildResponse(0x03, 0x41, []));
+        } else {
+            console.log('[TCP] CONNECT without password: OK. ESC/VP21 session started.');
+            socket.write(buildResponse(0x03, 0x20, []));
+            // Connection stays open for ESC/VP21 commands
+        }
+        return;
+    }
+
+    // Validate: only Password (id 1) headers should be used for CONNECT
+    const pwHeader = headers.find(h => h.id === 0x01);
+    if (!pwHeader) {
+        console.log('[TCP] CONNECT: no password header found, sending Bad Request and disconnecting.');
+        socket.end(buildResponse(0x03, 0x40, []));
+        return;
+    }
+
+    if (pwHeader.attr === 0x01) {
+        // Plain text password (spec §5.2.2)
+        const receivedPw = pwHeader.info.toString('ascii').replace(/\0/g, '');
+        console.log(`[TCP] CONNECT with plain password: received="${receivedPw}"`);
+        if (!password || receivedPw === password) {
+            console.log('[TCP] CONNECT: authenticated OK. ESC/VP21 session started.');
+            socket.write(buildResponse(0x03, 0x20, []));
+            // Connection stays open for ESC/VP21 commands
+        } else {
+            console.log('[TCP] CONNECT: wrong password, sending Forbidden and disconnecting.');
+            socket.end(buildResponse(0x03, 0x43, []));
+        }
+    } else if (pwHeader.attr === 0x03) {
+        // Client is requesting MD5 challenge — send empty salt (emulation mode)
+        const salt = Buffer.alloc(16, 0); // Empty salt for emulation
+        console.log(`[TCP] CONNECT: MD5 challenge requested, sending empty salt: ${salt.toString('hex')}`);
+
+        // Build Unauthorized response with salt in a password header
+        const saltHeader = Buffer.alloc(18);
+        saltHeader.writeUInt8(0x01, 0);  // Header id: Password
+        saltHeader.writeUInt8(0x06, 1);  // Header attr: salt delivery
+        salt.copy(saltHeader, 2);        // 16-byte salt (all zeros)
+
+        socket.write(buildResponse(0x03, 0x41, [saltHeader]));
+    } else if (pwHeader.attr === 0x04) {
+        // Client sent MD5 hash — accept all for emulation
+        const receivedHash = pwHeader.info;
+        console.log(`[TCP] CONNECT: MD5 hash received: ${receivedHash.toString('hex')}`);
+        // TODO: validate hash = MD5(salt + password) when implementing real auth
+        console.log('[TCP] CONNECT: accepting hash (emulation mode). ESC/VP21 session started.');
+        socket.write(buildResponse(0x03, 0x20, []));
+        // Connection stays open for ESC/VP21 commands
+    } else {
+        console.log(`[TCP] CONNECT: unknown password attr 0x${pwHeader.attr.toString(16)}, sending Bad Request and disconnecting.`);
+        socket.end(buildResponse(0x03, 0x40, []));
+    }
+}
 server.on('error', (err) => {
     console.error(`Server error: ${err}`);
 });
