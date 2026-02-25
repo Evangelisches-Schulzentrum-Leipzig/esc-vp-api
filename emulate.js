@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const port = 3629;
 const host = '0.0.0.0';
 const password = 'admin';
-const projectorName = 'EPSON Projector';
+const projectorName = 'EPSON Projecto';
 
 // ==================== UDP HELLO Server (Session-less Mode) ====================
 const udpServer = dgram.createSocket('udp4');
