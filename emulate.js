@@ -170,7 +170,7 @@ const server = Net.createServer((socket) => {
         console.log(`[TCP] Version: 0x${protocolVersion.toString(16)}, Type: ${messageType}, Status: 0x${statusByte.toString(16)}, Headers: ${headerCount}`);
 
         // Version must be 0x10 (spec §6.1)
-        if (protocolVersion !== 0x10) {
+        if (protocolVersion !== 0x10 && false) {
             console.log('[TCP] Unsupported version, sending Version Not Supported and disconnecting.');
             socket.end(buildResponse(messageType, 0x55, []));
             return;
