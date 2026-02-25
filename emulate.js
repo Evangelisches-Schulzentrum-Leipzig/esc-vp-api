@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const port = 3629;
 const host = '0.0.0.0';
 const password = 'admin';
-const projectorName = 'EPSON Projecto';
+const projectorName = 'EPSON Projector';
 
 // ==================== UDP HELLO Server (Session-less Mode) ====================
 const udpServer = dgram.createSocket('udp4');
@@ -321,7 +321,7 @@ function handleConnectRequest(socket, headerCount, headers) {
         }
     } else if (pwHeader.attr === 0x03) {
         // Client is requesting MD5 challenge — send empty salt (emulation mode)
-        const salt = Buffer.alloc(16, 0); // Empty salt for emulation
+        const salt = Buffer.alloc(16, 1); // Empty salt for emulation
         console.log(`[TCP] CONNECT: MD5 challenge requested, sending empty salt: ${salt.toString('hex')}`);
 
         // Build Unauthorized response with salt in a password header
