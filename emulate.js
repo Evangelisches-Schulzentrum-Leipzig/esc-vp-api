@@ -213,6 +213,17 @@ const server = Net.createServer((socket) => {
                         socket.write(failureBuffer);
                     }
                 }
+            } else if ((messageType === 0x03 || messageType === 0x02) && headerNumber === 0) { // CONNECTION or PASSWORD message with no headers
+                console.log('Received CONNECTION message with no headers. Sending Password Required response.');
+                const responseBuffer = Buffer.alloc(34);
+                responseBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
+                responseBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
+                responseBuffer.writeUInt8(0x03, 11); // Message type (0x03 = CONNECTION)
+                responseBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
+                responseBuffer.writeUInt8(0x41, 14); // Status (0x41 = Unauthorized - Password Required)
+                responseBuffer.writeUInt8(0x00, 15); // Header number
+                console.log(`Sending Password Required response to client (hex): ${responseBuffer.toString('hex')}`);
+                socket.write(responseBuffer);
             }
         }
     });
