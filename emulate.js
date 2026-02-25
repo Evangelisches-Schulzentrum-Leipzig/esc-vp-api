@@ -252,16 +252,22 @@ function handlePasswordRequest(socket, headerCount, headers) {
     }
 
     // PASSWORD confirm: check the provided password (spec §5.1.2)
-    const pwHeader = headers.find(h => h.id === 0x01);
-    if (!pwHeader) {
+    // Collect all password headers by attribute
+    const pwHeaders = headers.filter(h => h.id === 0x01);
+    if (pwHeaders.length === 0) {
         console.log('[TCP] PASSWORD confirm: no password header, sending Bad Request.');
         socket.end(buildResponse(0x02, 0x40, []));
         return;
     }
 
-    if (pwHeader.attr === 0x01) {
+    // Find specific header types
+    const plainHeader = pwHeaders.find(h => h.attr === 0x01);
+    const hashHeader = pwHeaders.find(h => h.attr === 0x04);
+    const saltHeader = pwHeaders.find(h => h.attr === 0x05);
+
+    if (plainHeader) {
         // Plain text password
-        const receivedPw = pwHeader.info.toString('ascii').replace(/\0/g, '');
+        const receivedPw = plainHeader.info.toString('ascii').replace(/\0/g, '');
         console.log(`[TCP] PASSWORD confirm (plain): received="${receivedPw}"`);
         if (!password || receivedPw === password) {
             console.log('[TCP] PASSWORD confirm: OK.');
@@ -270,13 +276,18 @@ function handlePasswordRequest(socket, headerCount, headers) {
             console.log('[TCP] PASSWORD confirm: wrong password, sending Forbidden.');
             socket.end(buildResponse(0x02, 0x43, []));
         }
-    } else if (pwHeader.attr === 0x04) {
-        // MD5 hash — accept all for now (emulation mode)
-        // TODO: validate hash against salt + password when implementing real auth
-        console.log(`[TCP] PASSWORD confirm (MD5): accepting hash (emulation mode).`);
+    } else if (hashHeader) {
+        // MD5 hash (attr 0x04), optionally accompanied by salt echo (attr 0x05)
+        const receivedHash = hashHeader.info;
+        console.log(`[TCP] PASSWORD confirm (MD5): hash=${receivedHash.toString('hex')}`);
+        if (saltHeader) {
+            console.log(`[TCP] PASSWORD confirm (MD5): salt echo=${saltHeader.info.toString('hex')}`);
+        }
+        // TODO: validate hash = MD5(salt + password) when implementing real auth
+        console.log('[TCP] PASSWORD confirm (MD5): accepting hash (emulation mode).');
         socket.end(buildResponse(0x02, 0x20, []));
     } else {
-        console.log(`[TCP] PASSWORD confirm: unknown attr 0x${pwHeader.attr.toString(16)}, sending Bad Request.`);
+        console.log(`[TCP] PASSWORD confirm: unsupported header attrs [${pwHeaders.map(h => '0x' + h.attr.toString(16)).join(', ')}], sending Bad Request.`);
         socket.end(buildResponse(0x02, 0x40, []));
     }
 }
@@ -300,16 +311,22 @@ function handleConnectRequest(socket, headerCount, headers) {
     }
 
     // Validate: only Password (id 1) headers should be used for CONNECT
-    const pwHeader = headers.find(h => h.id === 0x01);
-    if (!pwHeader) {
+    const pwHeaders = headers.filter(h => h.id === 0x01);
+    if (pwHeaders.length === 0) {
         console.log('[TCP] CONNECT: no password header found, sending Bad Request and disconnecting.');
         socket.end(buildResponse(0x03, 0x40, []));
         return;
     }
 
-    if (pwHeader.attr === 0x01) {
+    // Find specific header types by attribute
+    const plainHeader = pwHeaders.find(h => h.attr === 0x01);
+    const challengeHeader = pwHeaders.find(h => h.attr === 0x03);
+    const hashHeader = pwHeaders.find(h => h.attr === 0x04);
+    const saltEchoHeader = pwHeaders.find(h => h.attr === 0x05);
+
+    if (plainHeader) {
         // Plain text password (spec §5.2.2)
-        const receivedPw = pwHeader.info.toString('ascii').replace(/\0/g, '');
+        const receivedPw = plainHeader.info.toString('ascii').replace(/\0/g, '');
         console.log(`[TCP] CONNECT with plain password: received="${receivedPw}"`);
         if (!password || receivedPw === password) {
             console.log('[TCP] CONNECT: authenticated OK. ESC/VP21 session started.');
@@ -319,28 +336,31 @@ function handleConnectRequest(socket, headerCount, headers) {
             console.log('[TCP] CONNECT: wrong password, sending Forbidden and disconnecting.');
             socket.end(buildResponse(0x03, 0x43, []));
         }
-    } else if (pwHeader.attr === 0x03) {
+    } else if (challengeHeader) {
         // Client is requesting MD5 challenge — send empty salt (emulation mode)
-        const salt = Buffer.alloc(16, 1); // Empty salt for emulation
-        console.log(`[TCP] CONNECT: MD5 challenge requested, sending empty salt: ${salt.toString('hex')}`);
+        const salt = Buffer.alloc(16, 0); // Empty salt for emulation
+        console.log(`[TCP] CONNECT: MD5 challenge requested, sending salt: ${salt.toString('hex')}`);
 
         // Build Unauthorized response with salt in a password header
-        const saltHeader = Buffer.alloc(18);
-        saltHeader.writeUInt8(0x01, 0);  // Header id: Password
-        saltHeader.writeUInt8(0x06, 1);  // Header attr: salt delivery
-        salt.copy(saltHeader, 2);        // 16-byte salt (all zeros)
+        const saltRespHeader = Buffer.alloc(18);
+        saltRespHeader.writeUInt8(0x01, 0);  // Header id: Password
+        saltRespHeader.writeUInt8(0x06, 1);  // Header attr: salt delivery
+        salt.copy(saltRespHeader, 2);        // 16-byte salt
 
-        socket.write(buildResponse(0x03, 0x41, [saltHeader]));
-    } else if (pwHeader.attr === 0x04) {
-        // Client sent MD5 hash — accept all for emulation
-        const receivedHash = pwHeader.info;
+        socket.write(buildResponse(0x03, 0x41, [saltRespHeader]));
+    } else if (hashHeader) {
+        // Client sent MD5 hash (attr 0x04), typically accompanied by salt echo (attr 0x05)
+        const receivedHash = hashHeader.info;
         console.log(`[TCP] CONNECT: MD5 hash received: ${receivedHash.toString('hex')}`);
+        if (saltEchoHeader) {
+            console.log(`[TCP] CONNECT: salt echo received: ${saltEchoHeader.info.toString('hex')}`);
+        }
         // TODO: validate hash = MD5(salt + password) when implementing real auth
         console.log('[TCP] CONNECT: accepting hash (emulation mode). ESC/VP21 session started.');
         socket.write(buildResponse(0x03, 0x20, []));
         // Connection stays open for ESC/VP21 commands
     } else {
-        console.log(`[TCP] CONNECT: unknown password attr 0x${pwHeader.attr.toString(16)}, sending Bad Request and disconnecting.`);
+        console.log(`[TCP] CONNECT: unsupported password attrs [${pwHeaders.map(h => '0x' + h.attr.toString(16)).join(', ')}], sending Bad Request and disconnecting.`);
         socket.end(buildResponse(0x03, 0x40, []));
     }
 }
