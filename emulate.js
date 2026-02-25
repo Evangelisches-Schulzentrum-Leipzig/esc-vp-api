@@ -186,8 +186,8 @@ const server = Net.createServer((socket) => {
                     console.log(`Received MD5 hash from client: ${receivedHash.toString('hex')}`);
                     
                     // Validate hash
-                    const expectedHash = crypto.createHash('md5').update(salt + password).digest();
-                    if (receivedHash.equals(expectedHash) || true) { // For testing, accept any hash
+                    // const expectedHash = crypto.createHash('md5').update(salt + password).digest();
+                    if (true) { // For testing, accept any hash
                         console.log('Client authenticated successfully.');
                         // Send success response
                         const successBuffer = Buffer.alloc(34);
