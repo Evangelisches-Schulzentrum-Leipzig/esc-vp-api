@@ -338,7 +338,7 @@ function handleConnectRequest(socket, headerCount, headers) {
         }
     } else if (challengeHeader) {
         // Client is requesting MD5 challenge — send empty salt (emulation mode)
-        const salt = Buffer.alloc(16, 0); // Empty salt for emulation
+        const salt = Buffer.alloc(16, 1); // Empty salt for emulation
         console.log(`[TCP] CONNECT: MD5 challenge requested, sending salt: ${salt.toString('hex')}`);
 
         // Build Unauthorized response with salt in a password header
