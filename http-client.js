@@ -25,7 +25,7 @@ const PROJECTOR_PORT = parseInt(process.env.PROJECTOR_PORT || '80', 10);
 const USERNAME = process.env.PROJECTOR_USER || 'EPSONWEB';
 const PASSWORD = process.env.PROJECTOR_PASSWORD || 'admin';
 const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || '3000', 10);
-const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '10000', 10);
+const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5000', 10);
 
 // ==================== Dynamic Model-Dependent Value Maps ====================
 // Populated at runtime from SOURCELIST? response
@@ -367,10 +367,12 @@ const GET_COMMANDS = {
 
 // ==================== Response Parsers ====================
 function parseResponse(cmd, raw) {
+    raw = raw === "ERR" ? null : raw; // Treat "ERR" response as null (e.g. for unsupported commands)
+
     const def = GET_COMMANDS[cmd];
     if (!def) return { raw, display: raw };
 
-    const trimmed = raw.trim();
+    const trimmed = (raw || '').trim();
 
     // Lookup table values
     if (def.values) {
@@ -575,12 +577,18 @@ function httpGet(urlPath) {
 }
 
 // ==================== Command Execution ====================
-async function queryCommand(cmd) {
-    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + '?')}`;
+async function queryCommand(cmd) {    
+    // Dont escape the '?' because the projector expects it verbatim in the URL
+    // PWR%3F wont work, it must be PWR? in the URL path
+    const urlPath = `/api/v01/control/escvp21?cmd=${(cmd + '?')}`;
     try {
         const raw = await httpGet(urlPath);
         const parsed = parseResponse(cmd, raw);
-        return { cmd, status: 'ok', ...parsed };
+        if (raw === "ERR") {
+            return { cmd, status: 'error', raw: 'ERR', display: '' };
+        } else {
+            return { cmd, status: 'ok', ...parsed };
+        }
     } catch (err) {
         return { cmd, status: 'error', raw: '', display: err.message };
     }
@@ -589,7 +597,7 @@ async function queryCommand(cmd) {
 // Per ESC/VP21 spec 1.1: Set command = COMMAND PARAM\r
 // HTTP API format: cmd=COMMAND+PARAM
 async function sendSetCommand(cmd, param) {
-    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + ' ' + param)}`;
+    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + '+' + param)}`;
     return httpGet(urlPath);
 }
 
