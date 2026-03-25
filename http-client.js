@@ -597,7 +597,7 @@ async function queryCommand(cmd) {
 // Per ESC/VP21 spec 1.1: Set command = COMMAND PARAM\r
 // HTTP API format: cmd=COMMAND+PARAM
 async function sendSetCommand(cmd, param) {
-    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + '+' + param)}`;
+    const urlPath = `/api/v01/control/escvp21?cmd=${(cmd + '+' + param)}`;
     return httpGet(urlPath);
 }
 
