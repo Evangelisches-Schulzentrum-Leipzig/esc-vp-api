@@ -559,7 +559,9 @@ function httpGet(urlPath) {
 
 // ==================== Command Execution ====================
 async function queryCommand(cmd) {
-    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + '?')}`;
+    // Dont escape the '?' because the projector expects it verbatim in the URL
+    // PWR%3F wont work, it must be PWR? in the URL path
+    const urlPath = `/api/v01/control/escvp21?cmd=${(cmd + '?')}`;
     try {
         const raw = await httpGet(urlPath);
         const parsed = parseResponse(cmd, raw);
