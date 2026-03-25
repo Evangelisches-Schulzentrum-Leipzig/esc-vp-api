@@ -1,0 +1,75 @@
+curl --digest --user EPSONWEB:admin http://10.101.10.38/api/v01/control/escvp21?cmd=PWR? -vvv
+
+*   Trying 10.101.10.38:80...
+
+* Connected to 10.101.10.38 (10.101.10.38) port 80
+
+* Server auth using Digest with user 'EPSONWEB'
+
+> GET /api/v01/control/escvp21?cmd=PWR? HTTP/1.1
+
+> Host: 10.101.10.38
+
+> User-Agent: curl/8.5.0
+
+> Accept: */*
+
+> 
+
+< HTTP/1.1 401 Unauthorized
+
+< WWW-Authenticate: Digest realm="Web Control", nonce="69c41b16:2802dcc4777523aa991ab2e3d583bb49", qop="auth"
+
+< Content-Type: text/html
+
+< Content-Length: 347
+
+< Date: Wed, 25 Mar 2026 17:27:50 GMT
+
+< Server: SEIKO EPSON CORPORATION
+
+< 
+
+* Ignoring the response-body
+
+* Connection #0 to host 10.101.10.38 left intact
+
+* Issue another request to this URL: 'http://10.101.10.38/api/v01/control/escvp21?cmd=PWR?'
+
+* Found bundle for host: 0x5680aea87b60 [serially]
+
+* Can not multiplex, even if we wanted to
+
+* Re-using existing connection with host 10.101.10.38
+
+* Server auth using Digest with user 'EPSONWEB'
+
+> GET /api/v01/control/escvp21?cmd=PWR? HTTP/1.1
+
+> Host: 10.101.10.38
+
+> Authorization: Digest username="EPSONWEB", realm="Web Control", nonce="69c41b16:2802dcc4777523aa991ab2e3d583bb49", uri="/api/v01/control/escvp21?cmd=PWR?", cnonce="MDIwN2EzZmE3YzlkMTAyMTg4NDU2ZWI3NTUwNzZiMDU=", nc=00000001, qop=auth, response="118a2c6979c44cb4a6ba66a665eb319d"
+
+> User-Agent: curl/8.5.0
+
+> Accept: */*
+
+> 
+
+< HTTP/1.1 200 OK
+
+< Content-Type: text/plain; charset=utf-8
+
+< X-Frame-Options: SAMEORIGIN
+
+< Content-Length: 2
+
+< Date: Wed, 25 Mar 2026 17:27:50 GMT
+
+< Server: SEIKO EPSON CORPORATION
+
+< 
+
+* Connection #0 to host 10.101.10.38 left intact
+
+01 
