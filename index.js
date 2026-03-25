@@ -3,18 +3,19 @@ const crypto = require('crypto');
 
 const port = 3629;
 const host = '10.101.10.38';
+const username = 'EPSONWEB';
 const password = 'admin';
 
 const helloMsgBuffer = Buffer.alloc(34);
 helloMsgBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
-helloMsgBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
-helloMsgBuffer.writeUInt8(0x03, 11); // Message type (0x03 = CONNECTION)
+helloMsgBuffer.writeUInt8(0x10, 10); // Protocol version (0x10 = 1.0)
+helloMsgBuffer.writeUInt8(0x02, 11); // Message type (0x02 = PASSWORD)
 helloMsgBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
 helloMsgBuffer.writeUInt8(0x00, 14); // Request
 helloMsgBuffer.writeUInt8(0x01, 15); // Header number (1 additional header)
 helloMsgBuffer.writeUInt8(0x01, 16); // Header identifier (0x01 = Password)
-helloMsgBuffer.writeUInt8(0x03, 17); // Header attributes (0x03 = Request MD5 Hash)
-helloMsgBuffer.write(''.padEnd(16, '\0'), 18, 'utf-8'); // Request data (empty password)
+helloMsgBuffer.writeUInt8(0x01, 17); // Header attributes (0x01 = Plain Text)
+helloMsgBuffer.write(password.padEnd(16, '\0'), 18, 'utf-8'); // Request data
 
 
 const client = new Net.Socket();
@@ -47,7 +48,7 @@ client.on('data', function(chunk) {
             // Calculate MD5 hash with responded salt of the password
             const salt = chunk.slice(18, 34);
             console.log(`Received salt from server: ${salt.toString('hex')}`);
-            const hash = crypto.createHash('md5').update(salt + password).digest();
+            const hash = crypto.createHash('md5').update(username + ":" + password).digest();
             const authMsgBuffer = Buffer.alloc(52);
             authMsgBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
             authMsgBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
