@@ -27,6 +27,10 @@ const PASSWORD = process.env.PROJECTOR_PASSWORD || 'admin';
 const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || '3000', 10);
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '10000', 10);
 
+// ==================== Dynamic Model-Dependent Value Maps ====================
+// Populated at runtime from SOURCELIST? response
+const modelSourceMap = {};
+
 // ==================== ESC/VP21 GET Command Definitions ====================
 const GET_COMMANDS = {
     // Power & Status
@@ -75,6 +79,7 @@ const GET_COMMANDS = {
     'SOURCE': {
         description: 'Input source',
         category: 'Input',
+        // Static fallback values from spec; overridden at runtime by SOURCELIST?
         values: {
             '10': 'Input 1 (D-Sub)',
             '11': 'Input 1 (RGB)',
@@ -97,7 +102,8 @@ const GET_COMMANDS = {
             'B2': 'Input 4 (YCbCr)',
             'B3': 'Input 4 (YPbPr)',
             'B4': 'Input 4 (Component)'
-        }
+        },
+        dynamic: true // values updated from SOURCELIST at runtime
     },
     'SOURCELIST': {
         description: 'Available input sources',
@@ -412,7 +418,15 @@ function parseResponse(cmd, raw) {
             const tokens = trimmed.split(/\s+/);
             const sources = [];
             for (let i = 0; i + 1 < tokens.length; i += 2) {
-                sources.push(`${tokens[i + 1].replace(/\^/g, ' ')} (${tokens[i]})`);
+                const code = tokens[i].toUpperCase();
+                const name = tokens[i + 1].replace(/\^/g, ' ');
+                sources.push(`${name} (${code})`);
+                // Populate model-specific source map for dynamic SOURCE? resolution
+                modelSourceMap[code] = name;
+            }
+            // Update SOURCE command values with model-specific names
+            if (Object.keys(modelSourceMap).length > 0) {
+                GET_COMMANDS['SOURCE'].values = { ...GET_COMMANDS['SOURCE'].values, ...modelSourceMap };
             }
             return { raw: trimmed, display: sources.join(', ') || trimmed };
         }
@@ -505,13 +519,13 @@ function buildDigestHeader(method, uri, challenge, username, password) {
         `nc=${nc}, qop=${challenge.qop}, response="${response}"`;
 }
 
-function httpGet(urlPath) {
+function httpRequest(method, urlPath) {
     return new Promise((resolve, reject) => {
         const options = {
             hostname: PROJECTOR_HOST,
             port: PROJECTOR_PORT,
             path: urlPath,
-            method: 'GET',
+            method,
             headers: { 'User-Agent': 'esc-vp-api/1.0' }
         };
 
@@ -521,7 +535,6 @@ function httpGet(urlPath) {
             res1.on('data', chunk => body1 += chunk);
             res1.on('end', () => {
                 if (res1.statusCode !== 401) {
-                    // No auth needed (unlikely but handle it)
                     resolve(body1);
                     return;
                 }
@@ -533,7 +546,7 @@ function httpGet(urlPath) {
                 const challenge = parseDigestChallenge(wwwAuth);
 
                 // Second request with digest credentials
-                const authHeader = buildDigestHeader('GET', urlPath, challenge, USERNAME, PASSWORD);
+                const authHeader = buildDigestHeader(method, urlPath, challenge, USERNAME, PASSWORD);
                 const options2 = { ...options, headers: { ...options.headers, 'Authorization': authHeader } };
                 const req2 = http.request(options2, (res2) => {
                     let body2 = '';
@@ -557,11 +570,13 @@ function httpGet(urlPath) {
     });
 }
 
+function httpGet(urlPath) {
+    return httpRequest('GET', urlPath);
+}
+
 // ==================== Command Execution ====================
 async function queryCommand(cmd) {
-    // Dont escape the '?' because the projector expects it verbatim in the URL
-    // PWR%3F wont work, it must be PWR? in the URL path
-    const urlPath = `/api/v01/control/escvp21?cmd=${(cmd + '?')}`;
+    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + '?')}`;
     try {
         const raw = await httpGet(urlPath);
         const parsed = parseResponse(cmd, raw);
@@ -571,40 +586,29 @@ async function queryCommand(cmd) {
     }
 }
 
+// Per ESC/VP21 spec 1.1: Set command = COMMAND PARAM\r
+// HTTP API format: cmd=COMMAND+PARAM
+async function sendSetCommand(cmd, param) {
+    const urlPath = `/api/v01/control/escvp21?cmd=${encodeURIComponent(cmd + ' ' + param)}`;
+    return httpGet(urlPath);
+}
+
 async function queryAllCommands() {
     const results = {};
     const cmds = Object.keys(GET_COMMANDS);
 
-    // Query sequentially to avoid overwhelming the projector
+    // Query SOURCELIST first so model-dependent SOURCE values are available
+    if (GET_COMMANDS['SOURCELIST']) {
+        results['SOURCELIST'] = await queryCommand('SOURCELIST');
+    }
+
+    // Query remaining commands sequentially to avoid overwhelming the projector
     for (const cmd of cmds) {
+        if (cmd === 'SOURCELIST') continue;
         results[cmd] = await queryCommand(cmd);
     }
 
     return results;
-}
-
-// ==================== Console Output ====================
-function printResults(results) {
-    console.log('\n' + '='.repeat(72));
-    console.log(`  Epson Projector Status — ${PROJECTOR_HOST} — ${new Date().toLocaleString()}`);
-    console.log('='.repeat(72));
-
-    const categories = {};
-    for (const [cmd, result] of Object.entries(results)) {
-        const cat = GET_COMMANDS[cmd]?.category || 'Other';
-        if (!categories[cat]) categories[cat] = [];
-        categories[cat].push({ cmd, ...result });
-    }
-
-    for (const [cat, items] of Object.entries(categories)) {
-        console.log(`\n  [${cat}]`);
-        for (const item of items) {
-            const desc = GET_COMMANDS[item.cmd]?.description || item.cmd;
-            const icon = item.status === 'ok' ? '✓' : '✗';
-            console.log(`    ${icon} ${desc.padEnd(30)} ${item.display}`);
-        }
-    }
-    console.log('\n' + '='.repeat(72));
 }
 
 // ==================== HTML Dashboard ====================
@@ -747,12 +751,28 @@ function generateHtml(results) {
   .badge.error { background: rgba(248,113,113,0.15); color: var(--red); }
   .badge.warn { background: rgba(251,191,36,0.15); color: var(--yellow); }
   footer { margin-top: 1.5rem; color: var(--text-dim); font-size: 0.8rem; text-align: center; }
+  .power-btn {
+    border: none; cursor: pointer; font-weight: 600; font-size: 0.85rem;
+    padding: 0.45em 1.1em; border-radius: 6px; transition: opacity 0.15s;
+    font-family: inherit;
+  }
+  .power-btn:hover { opacity: 0.85; }
+  .power-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .power-btn-on { background: var(--green); color: #0f1117; }
+  .power-btn-off { background: var(--red); color: #fff; }
+  .power-controls { display: flex; gap: 0.5rem; align-items: center; margin-left: 1rem; }
+  .power-feedback { font-size: 0.8rem; color: var(--text-dim); min-height: 1.2em; }
 </style>
 </head>
 <body>
   <header class="${powerClass}">
     <div class="power-indicator"></div>
     <h1>${escapeHtml(projName)}</h1>
+    <div class="power-controls">
+      <button class="power-btn power-btn-on" onclick="sendPower('ON')" id="btn-on">Power On</button>
+      <button class="power-btn power-btn-off" onclick="sendPower('OFF')" id="btn-off">Power Off</button>
+      <span class="power-feedback" id="power-feedback"></span>
+    </div>
     <div class="meta">
       ${escapeHtml(PROJECTOR_HOST)}<br>
       S/N: ${escapeHtml(serial)}<br>
@@ -793,18 +813,63 @@ function generateHtml(results) {
     </tbody>
   </table>
   <footer>Auto-refresh: ${Math.round(POLL_INTERVAL / 1000)}s &middot; ESC/VP21 over HTTP Digest &middot; esc-vp-api</footer>
+  <script>
+    async function sendPower(action) {
+      const fb = document.getElementById('power-feedback');
+      const btnOn = document.getElementById('btn-on');
+      const btnOff = document.getElementById('btn-off');
+      btnOn.disabled = btnOff.disabled = true;
+      fb.textContent = 'Sending PWR ' + action + '\u2026';
+      try {
+        const res = await fetch('/api/power?action=' + encodeURIComponent(action), { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          fb.textContent = 'PWR ' + action + ' sent';
+          setTimeout(function() { location.reload(); }, 3000);
+        } else {
+          fb.textContent = 'Error: ' + (data.error || res.statusText);
+        }
+      } catch (e) {
+        fb.textContent = 'Request failed';
+      }
+      btnOn.disabled = btnOff.disabled = false;
+    }
+  </script>
 </body>
 </html>`;
 }
 
 // ==================== Dashboard Server ====================
 const server = http.createServer((req, res) => {
-    if (req.url === '/' || req.url === '/index.html') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+
+    if ((url.pathname === '/' || url.pathname === '/index.html') && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(generateHtml(latestResults));
-    } else if (req.url === '/api/status') {
+    } else if (url.pathname === '/api/status' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(latestResults, null, 2));
+    } else if (url.pathname === '/api/power' && req.method === 'POST') {
+        // Per ESC/VP21 spec 2.2: PWR ON = power on, PWR OFF = power off
+        const action = url.searchParams.get('action');
+        if (action !== 'ON' && action !== 'OFF') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'action must be ON or OFF' }));
+            return;
+        }
+        sendSetCommand('PWR', action)
+            .then((body) => {
+                console.log(`PWR ${action} sent, response: ${JSON.stringify(body)}`);
+                // Trigger a fresh poll so the dashboard updates quickly
+                poll();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, cmd: `PWR ${action}`, response: body }));
+            })
+            .catch((err) => {
+                console.error(`PWR ${action} failed: ${err.message}`);
+                res.writeHead(502, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            });
     } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not Found');
@@ -814,8 +879,11 @@ const server = http.createServer((req, res) => {
 // ==================== Main ====================
 async function poll() {
     try {
+        const t0 = Date.now();
         latestResults = await queryAllCommands();
-        printResults(latestResults);
+        const ok = Object.values(latestResults).filter(r => r.status === 'ok').length;
+        const fail = Object.values(latestResults).filter(r => r.status === 'error').length;
+        console.log(`[${new Date().toLocaleTimeString()}] Polled ${ok + fail} commands (${ok} ok, ${fail} err) in ${Date.now() - t0}ms`);
     } catch (err) {
         console.error('Poll error:', err.message);
     }
