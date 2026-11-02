@@ -1,4 +1,5 @@
 const http = require('http');
+const net = require('net');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -21,11 +22,13 @@ if (fs.existsSync(envPath)) {
 
 // ==================== Configuration ====================
 const PROJECTOR_HOST = process.env.PROJECTOR_HOST || '10.101.10.38';
-const PROJECTOR_PORT = parseInt(process.env.PROJECTOR_PORT || '80', 10);
-const USERNAME = process.env.PROJECTOR_USER || 'EPSONWEB';
+const PROJECTOR_PORT = parseInt(process.env.PROJECTOR_PORT || '3629', 10);
 const PASSWORD = process.env.PROJECTOR_PASSWORD || 'admin';
 const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || '3000', 10);
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5000', 10);
+const ESCVP_SIGNATURE = Buffer.from('ESC/VP.net', 'ascii');
+const ESCVP_CONNECT_TIMEOUT = 1000;
+const ESCVP_RECEIVE_TIMEOUT = 3000;
 
 // ==================== Dynamic Model-Dependent Value Maps ====================
 // Populated at runtime from SOURCELIST? response
@@ -496,93 +499,219 @@ function parseResponse(cmd, raw) {
     }
 }
 
-// ==================== HTTP Digest Authentication ====================
-function parseDigestChallenge(header) {
-    const params = {};
-    const regex = /(\w+)=(?:"([^"]+)"|([^\s,]+))/g;
-    let match;
-    while ((match = regex.exec(header)) !== null) {
-        params[match[1]] = match[2] || match[3];
+// ==================== ESC/VP.net TCP transport ====================
+function createEscvpPacket(version, type, headers = []) {
+    const packet = Buffer.alloc(16 + headers.length * 18);
+    ESCVP_SIGNATURE.copy(packet);
+    packet[10] = version;
+    packet[11] = type;
+    packet.writeUInt16BE(0, 12);
+    packet[14] = 0;
+    packet[15] = headers.length;
+
+    headers.forEach((header, index) => {
+        const offset = 16 + index * 18;
+        packet[offset] = header.id;
+        packet[offset + 1] = header.attribute;
+        header.data.copy(packet, offset + 2);
+    });
+    return packet;
+}
+
+function createSocketReader(socket) {
+    let buffer = Buffer.alloc(0);
+    let failure = null;
+    let ended = false;
+    const waiters = [];
+
+    function notify() {
+        while (waiters.length) waiters.shift()();
     }
-    return params;
+
+    socket.on('data', chunk => {
+        buffer = Buffer.concat([buffer, chunk]);
+        notify();
+    });
+    socket.on('error', error => {
+        failure = error;
+        notify();
+    });
+    socket.on('end', () => {
+        ended = true;
+        notify();
+    });
+    socket.on('close', () => {
+        ended = true;
+        notify();
+    });
+
+    async function waitForData() {
+        if (failure) throw failure;
+        if (ended) return;
+        await new Promise(resolve => waiters.push(resolve));
+        if (failure) throw failure;
+    }
+
+    return {
+        async readExactly(length) {
+            while (buffer.length < length) {
+                await waitForData();
+                if (ended && buffer.length < length) {
+                    throw new Error('Projector closed the ESC/VP.net connection unexpectedly');
+                }
+            }
+            const result = buffer.subarray(0, length);
+            buffer = buffer.subarray(length);
+            return result;
+        },
+        async readUntil(marker, maxLength = 4096) {
+            const markerBuffer = Buffer.from(marker, 'ascii');
+            let result = Buffer.alloc(0);
+            while (result.length <= maxLength) {
+                const markerIndex = buffer.indexOf(markerBuffer);
+                if (markerIndex !== -1) {
+                    result = Buffer.concat([result, buffer.subarray(0, markerIndex)]);
+                    buffer = buffer.subarray(markerIndex + markerBuffer.length);
+                    return result;
+                }
+                if (buffer.length) {
+                    result = Buffer.concat([result, buffer]);
+                    buffer = Buffer.alloc(0);
+                }
+                if (ended) return result;
+                await waitForData();
+            }
+            throw new Error('ESC/VP.net response exceeded the maximum length');
+        }
+    };
 }
 
-function buildDigestHeader(method, uri, challenge, username, password) {
-    const nc = '00000001';
-    const cnonce = crypto.randomBytes(16).toString('base64');
-    const ha1 = crypto.createHash('md5')
-        .update(`${username}:${challenge.realm}:${password}`).digest('hex');
-    const ha2 = crypto.createHash('md5')
-        .update(`${method}:${uri}`).digest('hex');
-    const response = crypto.createHash('md5')
-        .update(`${ha1}:${challenge.nonce}:${nc}:${cnonce}:${challenge.qop}:${ha2}`).digest('hex');
-    return `Digest username="${username}", realm="${challenge.realm}", ` +
-        `nonce="${challenge.nonce}", uri="${uri}", cnonce="${cnonce}", ` +
-        `nc=${nc}, qop=${challenge.qop}, response="${response}"`;
-}
-
-function httpRequest(method, urlPath) {
+function connectEscvp() {
     return new Promise((resolve, reject) => {
-        const options = {
-            hostname: PROJECTOR_HOST,
-            port: PROJECTOR_PORT,
-            path: urlPath,
-            method,
-            headers: { 'User-Agent': 'esc-vp-api/1.0' }
+        const socket = net.createConnection({ host: PROJECTOR_HOST, port: PROJECTOR_PORT });
+        const onError = error => {
+            socket.destroy();
+            reject(error);
         };
-
-        // First request to get the digest challenge
-        const req1 = http.request(options, (res1) => {
-            let body1 = '';
-            res1.on('data', chunk => body1 += chunk);
-            res1.on('end', () => {
-                if (res1.statusCode !== 401) {
-                    resolve(body1);
-                    return;
-                }
-                const wwwAuth = res1.headers['www-authenticate'];
-                if (!wwwAuth || !wwwAuth.startsWith('Digest')) {
-                    reject(new Error('Expected Digest authentication challenge'));
-                    return;
-                }
-                const challenge = parseDigestChallenge(wwwAuth);
-
-                // Second request with digest credentials
-                const authHeader = buildDigestHeader(method, urlPath, challenge, USERNAME, PASSWORD);
-                const options2 = { ...options, headers: { ...options.headers, 'Authorization': authHeader } };
-                const req2 = http.request(options2, (res2) => {
-                    let body2 = '';
-                    res2.on('data', chunk => body2 += chunk);
-                    res2.on('end', () => {
-                        if (res2.statusCode === 200) {
-                            resolve(body2);
-                        } else {
-                            reject(new Error(`HTTP ${res2.statusCode}: ${body2}`));
-                        }
-                    });
-                });
-                req2.on('error', reject);
-                req2.setTimeout(5000, () => { req2.destroy(new Error('Request timeout')); });
-                req2.end();
-            });
+        socket.once('error', onError);
+        socket.setTimeout(ESCVP_CONNECT_TIMEOUT, () => {
+            socket.destroy(new Error('ESC/VP.net connection timeout'));
         });
-        req1.on('error', reject);
-        req1.setTimeout(5000, () => { req1.destroy(new Error('Request timeout')); });
-        req1.end();
+        socket.once('connect', () => {
+            socket.removeListener('error', onError);
+            socket.setTimeout(ESCVP_RECEIVE_TIMEOUT, () => {
+                socket.destroy(new Error('ESC/VP.net receive timeout'));
+            });
+            resolve({ socket, reader: createSocketReader(socket) });
+        });
     });
 }
 
-function httpGet(urlPath) {
-    return httpRequest('GET', urlPath);
+function validateEscvpHeader(response, version, type) {
+    if (!response.subarray(0, 10).equals(ESCVP_SIGNATURE) ||
+        response[10] !== version || response[11] !== type) {
+        throw new Error('Invalid ESC/VP.net response header');
+    }
+}
+
+function createDigestResponse(password, nonce) {
+    const nonceHex = nonce.toString('hex');
+    const passwordHash = crypto.createHash('sha256')
+        .update(`ESC/VP.net:${password}`, 'utf8')
+        .digest('hex');
+    return crypto.createHash('sha256')
+        .update(`${passwordHash}:${nonceHex}`, 'utf8')
+        .digest();
+}
+
+function validateCommand(command) {
+    if (typeof command !== 'string' || command.length === 0 ||
+        Buffer.byteLength(command, 'ascii') !== command.length ||
+        /[^\x20-\x7e]/.test(command) || command.length > 31) {
+        throw new Error('ESC/VP.net commands must be 1-31 printable ASCII characters');
+    }
+}
+
+async function sendOpenCommand(command, readReply) {
+    const { socket, reader } = await connectEscvp();
+    try {
+        const password = Buffer.alloc(16);
+        Buffer.from('ELPCSPOPN', 'ascii').copy(password);
+        socket.write(createEscvpPacket(0x10, 0x03, [
+            { id: 0x01, attribute: 0x01, data: password }
+        ]));
+
+        const response = await reader.readExactly(16);
+        validateEscvpHeader(response, 0x10, 0x03);
+        if (response[14] !== 0x20) {
+            throw new Error(`ESC/VP.net open handshake failed (status 0x${response[14].toString(16)})`);
+        }
+
+        socket.write(Buffer.from(`${command}\r`, 'ascii'));
+        if (!readReply) return '';
+        const reply = await reader.readUntil('\r:');
+        if (!reply.length) throw new Error('Projector returned an empty ESC/VP.net response');
+        return reply.toString('ascii').trim();
+    } finally {
+        socket.destroy();
+    }
+}
+
+async function sendEscvpCommand(command, readReply = false) {
+    validateCommand(command);
+    const { socket, reader } = await connectEscvp();
+    try {
+        socket.write(createEscvpPacket(0x20, 0x03, [
+            { id: 0x01, attribute: 0x03, data: Buffer.alloc(16) }
+        ]));
+        const challenge = await reader.readExactly(34);
+        validateEscvpHeader(challenge, 0x20, 0x03);
+
+        if (challenge[14] === 0x55) {
+            socket.destroy();
+            return await sendOpenCommand(command, readReply);
+        }
+        if (challenge[14] !== 0x41 && challenge[14] !== 0x20) {
+            throw new Error(`ESC/VP.net challenge failed (status 0x${challenge[14].toString(16)})`);
+        }
+
+        const nonce = challenge[14] === 0x41
+            ? challenge.subarray(18, 34)
+            : Buffer.alloc(16);
+        const password = challenge[14] === 0x41 ? PASSWORD : '';
+        const digest = createDigestResponse(password, nonce);
+        socket.write(createEscvpPacket(0x20, 0x03, [
+            { id: 0x01, attribute: 0x04, data: digest.subarray(0, 16) },
+            { id: 0x01, attribute: 0x05, data: digest.subarray(16, 32) }
+        ]));
+
+        const response = await reader.readExactly(16);
+        validateEscvpHeader(response, 0x20, 0x03);
+        if (response[14] !== 0x20) {
+            throw new Error('ESC/VP.net authentication failed (-441): incorrect projector password');
+        }
+
+        socket.write(Buffer.from(`${command}\r`, 'ascii'));
+        if (!readReply) return '';
+        const reply = await reader.readUntil('\r:');
+        if (!reply.length) throw new Error('Projector returned an empty ESC/VP.net response');
+        return reply.toString('ascii').trim();
+    } finally {
+        socket.destroy();
+    }
+}
+
+function extractCommandValue(reply) {
+    const response = reply.split('\r:')[0].trim();
+    const separator = response.indexOf('=');
+    return separator === -1 ? response : response.slice(separator + 1).trim();
 }
 
 // ==================== Command Execution ====================
 async function queryCommand(cmd) {    
-    // Dont escape the '?' because the projector expects it verbatim in the URL
-    // PWR%3F wont work, it must be PWR? in the URL path
-    const urlPath = `/api/v01/control/escvp21?cmd=${(cmd + '?')}`;
     try {
-        const raw = await httpGet(urlPath);
+        const reply = await sendEscvpCommand(`${cmd}?`, true);
+        const raw = extractCommandValue(reply);
         const parsed = parseResponse(cmd, raw);
         if (raw === "ERR") {
             return { cmd, status: 'error', raw: 'ERR', display: '' };
@@ -594,11 +723,8 @@ async function queryCommand(cmd) {
     }
 }
 
-// Per ESC/VP21 spec 1.1: Set command = COMMAND PARAM\r
-// HTTP API format: cmd=COMMAND+PARAM
 async function sendSetCommand(cmd, param) {
-    const urlPath = `/api/v01/control/escvp21?cmd=${(cmd + '+' + param)}`;
-    return httpGet(urlPath);
+    return sendEscvpCommand(`${cmd} ${param}`);
 }
 
 async function queryAllCommands() {
@@ -820,7 +946,7 @@ function generateHtml(results) {
       ${tableRows}
     </tbody>
   </table>
-  <footer>Auto-refresh: ${Math.round(POLL_INTERVAL / 1000)}s &middot; ESC/VP21 over HTTP Digest &middot; esc-vp-api</footer>
+  <footer>Auto-refresh: ${Math.round(POLL_INTERVAL / 1000)}s &middot; ESC/VP.net over TCP &middot; esc-vp-api</footer>
   <script>
     async function sendPower(action) {
       const fb = document.getElementById('power-feedback');
@@ -898,7 +1024,7 @@ async function poll() {
 }
 
 server.listen(DASHBOARD_PORT, () => {
-    console.log(`Projector: ${PROJECTOR_HOST}:${PROJECTOR_PORT} (user: ${USERNAME})`);
+    console.log(`Projector: ${PROJECTOR_HOST}:${PROJECTOR_PORT}`);
     console.log(`Dashboard: http://localhost:${DASHBOARD_PORT}/`);
     console.log(`JSON API:  http://localhost:${DASHBOARD_PORT}/api/status`);
     console.log(`Polling every ${POLL_INTERVAL / 1000}s\n`);
