@@ -125,6 +125,9 @@ class Projector {
             case 'busy':
                 this._setConnection('busy');
                 return p.fastIntervalMs;
+            case 'refused':
+                this._setConnection('refused');
+                return p.maxBackoffMs;
             default:
                 this._setConnection('unreachable');
                 return Math.min(p.maxBackoffMs, p.fastIntervalMs * 2 ** Math.min(this.connection.consecutiveFailures, 10));
@@ -185,9 +188,9 @@ class Projector {
                     this.log.info(`[${this.host}] connected with protocol ${version}; settings saved`);
                     return session;
                 } catch (err) {
-                    if (!(err instanceof EscvpError) || (err.kind !== 'auth' && err.kind !== 'version')) throw err;
+                    if (!(err instanceof EscvpError) || !['auth', 'version', 'handshake', 'refused'].includes(err.kind)) throw err;
                     last = err;
-                    if (err.kind === 'version') break; // wrong version: other passwords will fail the same way
+                    if (err.kind !== 'auth') break; // not a password problem: try the next version instead
                 }
             }
         }

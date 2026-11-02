@@ -4,7 +4,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { parsePacket, buildPacket, digestFor } = require('../src/protocol');
 
-function createFakeProjector({ versions = ['v1', 'v2'], password = '', replies = {} } = {}) {
+function createFakeProjector({ versions = ['v1', 'v2'], password = '', replies = {}, dropUnsupported = false } = {}) {
     const nonce = crypto.randomBytes(16);
     const queries = [];
 
@@ -17,6 +17,7 @@ function createFakeProjector({ versions = ['v1', 'v2'], password = '', replies =
             sock.write(p);
         };
         const fail = (version, status) => {
+            if (dropUnsupported && status === 0x55) return sock.destroy();
             reply(version, status);
             sock.end();
         };

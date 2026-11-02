@@ -48,4 +48,4 @@ redacted from `NWWLCNF`.
 | POST | `/api/projectors/:id/refresh` | Poll that projector now |
 
 Each command result: `status` (`ok` / `unsupported` / `error`), `raw`, `value` (structured), `display`, `updatedAt`,
-`lastOkAt`, `changedAt`. Connection status is one of `online`, `unreachable`, `auth-failed`, `unsupported`, `busy`.
+`lastOkAt`, `changedAt`. Connection status is one of `online`, `unreachable`, `auth-failed`, `unsupported`, `refused`, `busy`.

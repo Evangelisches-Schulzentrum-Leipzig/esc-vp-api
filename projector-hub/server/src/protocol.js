@@ -22,7 +22,7 @@ const STATUS_TEXT = {
 // Only get-style queries may ever be written to a projector.
 const READ_ONLY_QUERY = /^[A-Z][A-Z0-9]{0,30}\?( [0-9A-Za-z]{1,16})?$/;
 
-/** kind: network | timeout | protocol | auth | version | busy | command */
+/** kind: network | timeout | handshake | protocol | auth | version | refused | busy | command */
 class EscvpError extends Error {
     constructor(kind, message, status = null) {
         super(message);
@@ -171,6 +171,7 @@ function statusError(status, context) {
     if (status === 0x41 || status === 0x43) kind = 'auth';
     else if (status === 0x55) kind = 'version';
     else if (status === 0x53) kind = 'busy';
+    else if (status === 0x45) kind = 'refused';
     return new EscvpError(kind, message, status);
 }
 
@@ -239,6 +240,10 @@ async function openSession({ host, port = 3629, version, password = '', connectT
         return new Session(conn.socket, conn.reader, ioTimeoutMs);
     } catch (err) {
         conn.socket.destroy();
+        // Some firmware resets/closes the socket instead of answering 0x55 to a version it does not speak.
+        if (err.kind === 'network' || err.kind === 'timeout') {
+            throw new EscvpError('handshake', `${version} handshake failed: ${err.message}`);
+        }
         throw err;
     }
 }

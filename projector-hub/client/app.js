@@ -39,7 +39,7 @@ function derive(p) {
     const [powerClass, powerText] = pwr ? (POWER[pwr.value] || ['standby', pwr.display]) : ['standby', '-'];
     const err = okVal(p, 'ERR');
     const alerts = [];
-    if (['auth-failed', 'unreachable', 'unsupported', 'busy'].includes(p.connection.status)) {
+    if (['auth-failed', 'unreachable', 'unsupported', 'refused', 'busy'].includes(p.connection.status)) {
         alerts.push(`Connection: ${p.connection.status}`);
     }
     if (err && err.value !== '00') alerts.push(`Error: ${err.display}`);

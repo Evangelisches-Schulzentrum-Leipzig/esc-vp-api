@@ -83,6 +83,17 @@ test('projector negotiates credentials/version, saves them and records state', a
     fake.server.close();
 });
 
+test('falls back to v1 when the projector drops the connection on v2', async () => {
+    const fake = await createFakeProjector({ versions: ['v1'], dropUnsupported: true, replies: REPLIES });
+    const config = new Config(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'escvp-')), 'c.json')).load();
+    config.data.protocol.port = fake.port;
+    const p = new Projector('127.0.0.1', { config, log });
+    await p._cycle();
+    assert.strictEqual(p.connection.status, 'online');
+    assert.strictEqual(p.connection.protocolVersion, 'v1');
+    fake.server.close();
+});
+
 test('all credentials rejected -> auth-failed', async () => {
     const fake = await createFakeProjector({ password: 'hidden' });
     const config = new Config(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'escvp-')), 'c.json')).load();
