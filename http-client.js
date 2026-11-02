@@ -688,7 +688,7 @@ async function sendEscvpCommand(command, readReply = false) {
         ]));
         console.log('ESC/VP.net sent initial packet');
         const head = await reader.readExactly(16);
-        validateEscvpHeader(head, 0x10, 0x03);
+        validateEscvpHeader(head, 0x20, 0x03);
 
         if (head[14] === 0x55) {
             console.error(`Projector error: ${describeStatus(head[14])}`);
@@ -712,14 +712,14 @@ async function sendEscvpCommand(command, readReply = false) {
         const password = challenge[14] === 0x41 ? PASSWORD : '';
         const digest = createDigestResponse(password, nonce);
         console.log(`ESC/VP.net digest: ${digest.toString('hex')}`);
-        socket.write(createEscvpPacket(0x10, 0x03, [
+        socket.write(createEscvpPacket(0x20, 0x03, [
             { id: 0x01, attribute: 0x04, data: digest.subarray(0, 16) },
             { id: 0x01, attribute: 0x05, data: digest.subarray(16, 32) }
         ]));
 
         const response = await reader.readExactly(16);
         console.log(`ESC/VP.net response: ${response.toString('hex')}`);
-        validateEscvpHeader(response, 0x10, 0x03);
+        validateEscvpHeader(response, 0x20, 0x03);
         if (response[14] !== 0x20) {
             const msg = `ESC/VP.net authentication failed (-441): ${describeStatus(response[14])}`;
             console.error(msg);
