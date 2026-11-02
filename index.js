@@ -2,9 +2,9 @@ const Net = require('net');
 const crypto = require('crypto');
 
 const port = 3629;
-const host = '10.101.10.38';
+const host = '10.1.198.239';
 const username = 'EPSONWEB';
-const password = 'admin';
+const password = '12345678';
 
 const helloMsgBuffer = Buffer.alloc(34);
 helloMsgBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
@@ -17,14 +17,22 @@ helloMsgBuffer.writeUInt8(0x01, 16); // Header identifier (0x01 = Password)
 helloMsgBuffer.writeUInt8(0x01, 17); // Header attributes (0x01 = Plain Text)
 helloMsgBuffer.write(password.padEnd(16, '\0'), 18, 'utf-8'); // Request data
 
+const helloBuffer = Buffer.alloc(16);
+helloBuffer.write('ESC/VP.net', 0, 'utf-8'); // Signature
+helloBuffer.writeUInt8(0x20, 10); // Protocol version (0x20 = 2.0)
+helloBuffer.writeUInt8(0x01, 11); // Message type (0x01 = HELLO)
+helloBuffer.writeUInt16BE(0x0000, 12); // Reserved (must be 0)
+helloBuffer.writeUInt8(0x00, 14); // Request
+helloBuffer.writeUInt8(0x00, 15); // Header number (0 additional header)
+
 
 const client = new Net.Socket();
 
 client.connect({ port: port, host: host }, function() {
     console.log('TCP connection established.');
 
-    console.log(`Sending data: ${helloMsgBuffer.toString('hex')}`);
-    client.write(helloMsgBuffer);
+    console.log(`Sending data: ${helloBuffer.toString('hex')}`);
+    client.write(helloBuffer);
 });
 
 client.on('data', function(chunk) {

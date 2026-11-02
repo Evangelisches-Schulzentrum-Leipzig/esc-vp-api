@@ -636,11 +636,25 @@ function validateCommand(command) {
     }
 }
 
+const ESCVP_STATUS = {
+    0x20: 'OK',
+    0x40: 'Bad request',
+    0x41: 'Unauthorized (password required)',
+    0x43: 'Forbidden (incorrect password)',
+    0x53: 'Service unavailable / busy',
+    0x55: 'Unsupported version (projector requires ESC/VP.net v1)'
+};
+
+function describeStatus(code) {
+    return `status 0x${code.toString(16)} - ${ESCVP_STATUS[code] || 'unknown'}`;
+}
+
+// ESC/VP.net v1: plain 16-byte password in the connect request.
 async function sendOpenCommand(command, readReply) {
     const { socket, reader } = await connectEscvp();
     try {
         const password = Buffer.alloc(16);
-        Buffer.from('ELPCSPOPN', 'ascii').copy(password);
+        Buffer.from(PASSWORD, 'utf8').subarray(0, 16).copy(password);
         socket.write(createEscvpPacket(0x10, 0x03, [
             { id: 0x01, attribute: 0x01, data: password }
         ]));
@@ -648,8 +662,11 @@ async function sendOpenCommand(command, readReply) {
         const response = await reader.readExactly(16);
         validateEscvpHeader(response, 0x10, 0x03);
         if (response[14] !== 0x20) {
-            throw new Error(`ESC/VP.net open handshake failed (status 0x${response[14].toString(16)})`);
+            const msg = `ESC/VP.net v1 password auth failed: ${describeStatus(response[14])}`;
+            console.error(msg);
+            throw new Error(msg);
         }
+        console.log('ESC/VP.net v1 password auth succeeded');
 
         socket.write(Buffer.from(`${command}\r`, 'ascii'));
         if (!readReply) return '';
@@ -670,19 +687,24 @@ async function sendEscvpCommand(command, readReply = false) {
             { id: 0x01, attribute: 0x03, data: Buffer.alloc(16) }
         ]));
         console.log('ESC/VP.net sent initial packet');
-        const challenge = await reader.readExactly(34);
-        console.log(`ESC/VP.net challenge: ${challenge.toString('hex')}`);
-        validateEscvpHeader(challenge, 0x20, 0x03);
+        const head = await reader.readExactly(16);
+        validateEscvpHeader(head, 0x10, 0x03);
 
-        if (challenge[14] === 0x55) {
-            console.log('ESC/VP.net requires open command handshake');
+        if (head[14] === 0x55) {
+            console.error(`Projector error: ${describeStatus(head[14])}`);
+            console.log('Falling back to ESC/VP.net v1 password auth');
             socket.destroy();
             return await sendOpenCommand(command, readReply);
         }
-        if (challenge[14] !== 0x41 && challenge[14] !== 0x20) {
-            console.log(`ESC/VP.net challenge failed (status 0x${challenge[14].toString('hex')})`);
-            throw new Error(`ESC/VP.net challenge failed (status 0x${challenge[14].toString(16)})`);
+        if (head[14] !== 0x41 && head[14] !== 0x20) {
+            const msg = `ESC/VP.net challenge failed: ${describeStatus(head[14])}`;
+            console.error(msg);
+            throw new Error(msg);
         }
+        const challenge = head[14] === 0x41
+            ? Buffer.concat([head, await reader.readExactly(18)])
+            : Buffer.concat([head, Buffer.alloc(18)]);
+        console.log(`ESC/VP.net challenge: ${challenge.toString('hex')}`);
 
         const nonce = challenge[14] === 0x41
             ? challenge.subarray(18, 34)
@@ -690,16 +712,18 @@ async function sendEscvpCommand(command, readReply = false) {
         const password = challenge[14] === 0x41 ? PASSWORD : '';
         const digest = createDigestResponse(password, nonce);
         console.log(`ESC/VP.net digest: ${digest.toString('hex')}`);
-        socket.write(createEscvpPacket(0x20, 0x03, [
+        socket.write(createEscvpPacket(0x10, 0x03, [
             { id: 0x01, attribute: 0x04, data: digest.subarray(0, 16) },
             { id: 0x01, attribute: 0x05, data: digest.subarray(16, 32) }
         ]));
 
         const response = await reader.readExactly(16);
         console.log(`ESC/VP.net response: ${response.toString('hex')}`);
-        validateEscvpHeader(response, 0x20, 0x03);
+        validateEscvpHeader(response, 0x10, 0x03);
         if (response[14] !== 0x20) {
-            throw new Error('ESC/VP.net authentication failed (-441): incorrect projector password');
+            const msg = `ESC/VP.net authentication failed (-441): ${describeStatus(response[14])}`;
+            console.error(msg);
+            throw new Error(msg);
         }
 
         socket.write(Buffer.from(`${command}\r`, 'ascii'));
