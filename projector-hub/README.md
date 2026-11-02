@@ -4,9 +4,16 @@ Read-only monitoring hub for Epson projectors (ESC/VP.net + ESC/VP21). The web c
 
 ## Client
 
-Dependency-free static page in `client/`, served by the server at `http://localhost:3000/`. It shows a sortable,
-filterable table (or card grid) of all projectors with a status summary, and a detail drawer with every command
-result and change history. To host it elsewhere, open it with `?api=http://<server>:3000`.
+Dependency-free static page in `client/`, served by the server at `http://localhost:3000/`.
+
+- **Views:** table (sortable, column picker), cards, tiles (one compact tile per projector, built for ~50 at a glance)
+  and insights (fleet status, lamp-hour histogram, alerts, sources in use, models, firmware, subnets, recent activity).
+- **Overview tools:** clickable KPI filters, search, group by status/subnet/model/firmware/source, CSV export,
+  highlighting of changed projectors, light/dark theme, configurable lamp-hour warning and refresh interval.
+- **Detail page** (`#/p/<ip>`): key figures, grouped state, inputs, identity, connection, network, searchable command
+  list, change history and raw JSON. `←`/`→` switch projectors, `Esc` goes back, `/` focuses search, `1`-`4` pick a view.
+- The URL hash keeps view, filter, search and grouping, so views can be bookmarked or shared.
+- `?demo=50` shows a synthetic fleet without a server. To host the page elsewhere use `?api=http://<server>:3000`.
 
 ## Server
 

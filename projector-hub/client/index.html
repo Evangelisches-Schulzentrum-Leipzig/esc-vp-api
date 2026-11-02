@@ -8,55 +8,59 @@
 </head>
 <body>
 <header class="topbar">
-  <h1>Projector Hub</h1>
-  <div class="stats" id="stats"></div>
-  <div class="spacer"></div>
-  <span class="fetch-state" id="fetch-state"></span>
-  <button id="btn-discover" title="Run network discovery now">Rediscover</button>
+  <a class="brand" href="#/"><span class="logo" data-icon="power"></span>Projector Hub</a>
+  <nav class="seg" id="view-switch" aria-label="View">
+    <button data-view="table" data-icon="table" title="Table (1)">Table</button>
+    <button data-view="cards" data-icon="cards" title="Cards (2)">Cards</button>
+    <button data-view="tiles" data-icon="tiles" title="Tiles (3)">Tiles</button>
+    <button data-view="insights" data-icon="chart" title="Insights (4)">Insights</button>
+  </nav>
+  <span class="spacer"></span>
+  <div class="status"><i id="live" class="live"></i><span id="fetch-state">Loading...</span></div>
+  <button class="icon-btn" id="btn-refresh" data-icon="refresh" title="Refresh now" aria-label="Refresh now"></button>
+  <button id="btn-discover" data-icon="radar" title="Run network discovery now">Rediscover</button>
+  <button class="icon-btn" data-pop="settings" data-icon="gear" title="Settings" aria-label="Settings"></button>
 </header>
-
-<section class="toolbar">
-  <input id="search" type="search" placeholder="Search name, IP, serial, model, source..." autocomplete="off">
-  <div class="chips" id="filters" role="group" aria-label="Filters"></div>
-  <div class="spacer"></div>
-  <div class="seg" id="view-switch" role="group" aria-label="View">
-    <button data-view="table">Table</button>
-    <button data-view="cards">Cards</button>
-  </div>
-</section>
-
 <div class="banner" id="banner" hidden></div>
 
-<main id="main">
-  <div class="table-wrap" id="table-view">
-    <table class="overview">
-      <thead id="thead"></thead>
-      <tbody id="tbody"></tbody>
-    </table>
-  </div>
-  <div class="cards" id="cards-view" hidden></div>
-  <p class="empty" id="empty" hidden>No projectors match.</p>
-</main>
+<div id="list-page" class="page">
+  <section class="kpis" id="kpis" aria-label="Filters"></section>
+  <section class="toolbar">
+    <label class="search"><span data-icon="search"></span><input id="search" type="search" placeholder="Search name, IP, serial, firmware, source..." autocomplete="off"><kbd>/</kbd></label>
+    <label class="field" id="tb-group">Group <select id="group-by"></select></label>
+    <label class="field" id="tb-sort">Sort <select id="sort-by"></select><button class="icon-btn sm" id="sort-dir" title="Reverse order"></button></label>
+    <button id="btn-clear" hidden data-icon="x">Clear filters</button>
+    <span class="spacer"></span>
+    <span class="dim" id="result-count"></span>
+    <button id="btn-columns" data-pop="colpicker" data-icon="columns">Columns</button>
+    <button id="btn-export" data-icon="download" title="Export the current list as CSV">CSV</button>
+  </section>
+  <main id="content"></main>
+  <p class="empty" id="empty" hidden></p>
+</div>
 
-<aside class="drawer" id="drawer" hidden>
-  <div class="drawer-head">
-    <div>
-      <h2 id="d-title"></h2>
-      <div class="meta" id="d-meta"></div>
-    </div>
-    <div class="drawer-actions">
-      <button id="d-refresh">Refresh now</button>
-      <button id="d-close" aria-label="Close">&times;</button>
-    </div>
-  </div>
-  <div class="seg tabs" id="d-tabs" role="group">
-    <button data-tab="state">State</button>
-    <button data-tab="history">History</button>
-  </div>
-  <div class="drawer-body" id="d-body"></div>
-</aside>
-<div class="scrim" id="scrim" hidden></div>
+<div id="detail-page" class="page" hidden>
+  <div id="d-top"></div>
+  <div id="d-body"></div>
+</div>
 
-<script src="app.js"></script>
+<div class="popover" id="settings" hidden>
+  <h4>Settings</h4>
+  <label>Theme <select id="set-theme"></select></label>
+  <label>Density <select id="set-density"></select></label>
+  <label>Auto refresh <select id="set-refresh"></select></label>
+  <label>Lamp warning (hours) <input id="set-lamp" type="number" min="1" step="100"></label>
+  <p class="dim small">Shortcuts: <kbd>/</kbd> search · <kbd>1</kbd>-<kbd>4</kbd> views · <kbd>←</kbd><kbd>→</kbd> previous / next projector · <kbd>Esc</kbd> back</p>
+</div>
+<div class="popover" id="colpicker" hidden>
+  <h4>Table columns</h4>
+  <div id="col-list" class="col-list"></div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+
+<script src="js/core.js"></script>
+<script src="js/views.js"></script>
+<script src="js/detail.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

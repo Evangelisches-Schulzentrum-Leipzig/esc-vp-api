@@ -2,6 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { catalog } = require('./commands');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -14,20 +15,25 @@ function createApi(manager, { startedAt = Date.now(), clientDir = null } = {}) {
         if (req.method !== 'GET' || !type || !file.startsWith(path.resolve(clientDir) + path.sep) || !fs.existsSync(file)) {
             return send(res, 404, { error: 'Not found' });
         }
-        res.writeHead(200, { 'Content-Type': type });
+        res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
         fs.createReadStream(file).pipe(res);
     };
 
     const send = (res, status, body) => {
-        const json = JSON.stringify(body);
-        res.writeHead(status, {
+        let payload = Buffer.from(JSON.stringify(body));
+        const headers = {
             'Content-Type': 'application/json; charset=utf-8',
-            'Content-Length': Buffer.byteLength(json),
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type',
-        });
-        res.end(json);
+        };
+        if (payload.length > 1024 && /\bgzip\b/.test(res.req?.headers['accept-encoding'] ?? '')) {
+            payload = zlib.gzipSync(payload);
+            headers['Content-Encoding'] = 'gzip';
+        }
+        headers['Content-Length'] = payload.length;
+        res.writeHead(status, headers);
+        res.end(payload);
     };
 
     const handle = (req, res) => {
@@ -43,6 +49,12 @@ function createApi(manager, { startedAt = Date.now(), clientDir = null } = {}) {
             return send(res, 200, { status: 'ok', projectors: manager.projectors.size, uptimeSeconds: Math.round((Date.now() - startedAt) / 1000) });
         }
         if (isGet && route.length === 1 && route[0] === 'commands') return send(res, 200, catalog());
+
+        if (isGet && route.length === 1 && route[0] === 'history') {
+            const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit')) || 100, 1000));
+            const feed = manager.list().flatMap(p => p.history.map(h => ({ host: p.host, name: p.summary().name, ...h })));
+            return send(res, 200, feed.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit));
+        }
 
         if (isPost && route.length === 1 && route[0] === 'discovery') {
             manager.discoverNow();
