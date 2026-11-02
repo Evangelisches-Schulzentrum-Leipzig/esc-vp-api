@@ -2,6 +2,12 @@
 
 Read-only monitoring hub for Epson projectors (ESC/VP.net + ESC/VP21). The web client will live in `client/`.
 
+## Client
+
+Dependency-free static page in `client/`, served by the server at `http://localhost:3000/`. It shows a sortable,
+filterable table (or card grid) of all projectors with a status summary, and a detail drawer with every command
+result and change history. To host it elsewhere, open it with `?api=http://<server>:3000`.
+
 ## Server
 
 ```

@@ -1,8 +1,23 @@
 'use strict';
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { catalog } = require('./commands');
 
-function createApi(manager, { startedAt = Date.now() } = {}) {
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+
+function createApi(manager, { startedAt = Date.now(), clientDir = null } = {}) {
+    const serveStatic = (req, res, pathname) => {
+        const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+        const file = clientDir && path.resolve(clientDir, rel);
+        const type = file && MIME[path.extname(file)];
+        if (req.method !== 'GET' || !type || !file.startsWith(path.resolve(clientDir) + path.sep) || !fs.existsSync(file)) {
+            return send(res, 404, { error: 'Not found' });
+        }
+        res.writeHead(200, { 'Content-Type': type });
+        fs.createReadStream(file).pipe(res);
+    };
+
     const send = (res, status, body) => {
         const json = JSON.stringify(body);
         res.writeHead(status, {
@@ -19,7 +34,7 @@ function createApi(manager, { startedAt = Date.now() } = {}) {
         if (req.method === 'OPTIONS') return send(res, 204, {});
         const url = new URL(req.url, 'http://localhost');
         const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-        if (parts[0] !== 'api') return send(res, 404, { error: 'Not found' });
+        if (parts[0] !== 'api') return serveStatic(req, res, url.pathname);
         const route = parts.slice(1);
         const isGet = req.method === 'GET';
         const isPost = req.method === 'POST';

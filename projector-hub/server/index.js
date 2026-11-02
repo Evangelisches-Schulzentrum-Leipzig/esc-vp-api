@@ -8,12 +8,12 @@ const { log } = require('./src/log');
 const configFile = process.env.ESCVP_CONFIG || path.join(__dirname, 'config.json');
 const config = new Config(configFile).load();
 const manager = new Manager(config, log);
-const api = createApi(manager);
+const api = createApi(manager, { clientDir: path.join(__dirname, '..', 'client') });
 
 const { host, port } = config.data.server;
 api.listen(port, host, () => {
     log.info(`Config: ${configFile}`);
-    log.info(`REST API listening on http://${host}:${port}/api`);
+    log.info(`Web client: http://${host}:${port}/  REST API: http://${host}:${port}/api`);
     manager.start();
 });
 

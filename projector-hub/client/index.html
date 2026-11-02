@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projector Hub</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Projector Hub</h1>
+  <div class="stats" id="stats"></div>
+  <div class="spacer"></div>
+  <span class="fetch-state" id="fetch-state"></span>
+  <button id="btn-discover" title="Run network discovery now">Rediscover</button>
+</header>
+
+<section class="toolbar">
+  <input id="search" type="search" placeholder="Search name, IP, serial, model, source..." autocomplete="off">
+  <div class="chips" id="filters" role="group" aria-label="Filters"></div>
+  <div class="spacer"></div>
+  <div class="seg" id="view-switch" role="group" aria-label="View">
+    <button data-view="table">Table</button>
+    <button data-view="cards">Cards</button>
+  </div>
+</section>
+
+<div class="banner" id="banner" hidden></div>
+
+<main id="main">
+  <div class="table-wrap" id="table-view">
+    <table class="overview">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="cards" id="cards-view" hidden></div>
+  <p class="empty" id="empty" hidden>No projectors match.</p>
+</main>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="drawer-head">
+    <div>
+      <h2 id="d-title"></h2>
+      <div class="meta" id="d-meta"></div>
+    </div>
+    <div class="drawer-actions">
+      <button id="d-refresh">Refresh now</button>
+      <button id="d-close" aria-label="Close">&times;</button>
+    </div>
+  </div>
+  <div class="seg tabs" id="d-tabs" role="group">
+    <button data-tab="state">State</button>
+    <button data-tab="history">History</button>
+  </div>
+  <div class="drawer-body" id="d-body"></div>
+</aside>
+<div class="scrim" id="scrim" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
