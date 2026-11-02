@@ -515,6 +515,7 @@ function createEscvpPacket(version, type, headers = []) {
         packet[offset + 1] = header.attribute;
         header.data.copy(packet, offset + 2);
     });
+    console.log(`ESC/VP.net packet created: ${packet.toString('hex')}`);
     return packet;
 }
 
@@ -590,6 +591,8 @@ function connectEscvp() {
     return new Promise((resolve, reject) => {
         const socket = net.createConnection({ host: PROJECTOR_HOST, port: PROJECTOR_PORT });
         const onError = error => {
+            console.error(`ESC/VP.net connection error: ${error.message}`);
+            console.error(error);
             socket.destroy();
             reject(error);
         };
@@ -598,6 +601,7 @@ function connectEscvp() {
             socket.destroy(new Error('ESC/VP.net connection timeout'));
         });
         socket.once('connect', () => {
+            console.log(`ESC/VP.net connected to ${PROJECTOR_HOST}:${PROJECTOR_PORT}`);
             socket.removeListener('error', onError);
             socket.setTimeout(ESCVP_RECEIVE_TIMEOUT, () => {
                 socket.destroy(new Error('ESC/VP.net receive timeout'));
@@ -660,18 +664,23 @@ async function sendOpenCommand(command, readReply) {
 async function sendEscvpCommand(command, readReply = false) {
     validateCommand(command);
     const { socket, reader } = await connectEscvp();
+    console.log(`ESC/VP.net connected to ${PROJECTOR_HOST}:${PROJECTOR_PORT}`);
     try {
         socket.write(createEscvpPacket(0x20, 0x03, [
             { id: 0x01, attribute: 0x03, data: Buffer.alloc(16) }
         ]));
+        console.log('ESC/VP.net sent initial packet');
         const challenge = await reader.readExactly(34);
+        console.log(`ESC/VP.net challenge: ${challenge.toString('hex')}`);
         validateEscvpHeader(challenge, 0x20, 0x03);
 
         if (challenge[14] === 0x55) {
+            console.log('ESC/VP.net requires open command handshake');
             socket.destroy();
             return await sendOpenCommand(command, readReply);
         }
         if (challenge[14] !== 0x41 && challenge[14] !== 0x20) {
+            console.log(`ESC/VP.net challenge failed (status 0x${challenge[14].toString('hex')})`);
             throw new Error(`ESC/VP.net challenge failed (status 0x${challenge[14].toString(16)})`);
         }
 
@@ -680,12 +689,14 @@ async function sendEscvpCommand(command, readReply = false) {
             : Buffer.alloc(16);
         const password = challenge[14] === 0x41 ? PASSWORD : '';
         const digest = createDigestResponse(password, nonce);
+        console.log(`ESC/VP.net digest: ${digest.toString('hex')}`);
         socket.write(createEscvpPacket(0x20, 0x03, [
             { id: 0x01, attribute: 0x04, data: digest.subarray(0, 16) },
             { id: 0x01, attribute: 0x05, data: digest.subarray(16, 32) }
         ]));
 
         const response = await reader.readExactly(16);
+        console.log(`ESC/VP.net response: ${response.toString('hex')}`);
         validateEscvpHeader(response, 0x20, 0x03);
         if (response[14] !== 0x20) {
             throw new Error('ESC/VP.net authentication failed (-441): incorrect projector password');
@@ -719,6 +730,8 @@ async function queryCommand(cmd) {
             return { cmd, status: 'ok', ...parsed };
         }
     } catch (err) {
+        console.warn(`Command failed: ${cmd}, Error: ${err.message}`);
+        console.warn(err)
         return { cmd, status: 'error', raw: '', display: err.message };
     }
 }
@@ -1017,6 +1030,9 @@ async function poll() {
         latestResults = await queryAllCommands();
         const ok = Object.values(latestResults).filter(r => r.status === 'ok').length;
         const fail = Object.values(latestResults).filter(r => r.status === 'error').length;
+        if (fail > 0) {
+            console.warn(`Failed commands: ${JSON.stringify(Object.values(latestResults).filter(r => r.status === 'error'))}`);
+        }
         console.log(`[${new Date().toLocaleTimeString()}] Polled ${ok + fail} commands (${ok} ok, ${fail} err) in ${Date.now() - t0}ms`);
     } catch (err) {
         console.error('Poll error:', err.message);
