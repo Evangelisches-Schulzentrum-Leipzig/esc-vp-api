@@ -1,0 +1,12 @@
+{
+  "name": "projector-hub-server",
+  "version": "1.0.0",
+  "description": "Discovers Epson projectors (ESC/VP.net), polls their read-only state and exposes it via a REST API",
+  "private": true,
+  "main": "index.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/"
+  }
+}
